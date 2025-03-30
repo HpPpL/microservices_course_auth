@@ -1,4 +1,4 @@
-module github.com/HpPpL/microservices_course/microservices_course_auth/grpc
+module github.com/HpPpL/microservices_course_auth
 
 go 1.24
 

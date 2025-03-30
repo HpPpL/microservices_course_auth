@@ -17,7 +17,7 @@ import (
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	desc "github.com/HpPpL/microservices_course/microservices_course_auth/grpc/pkg/auth_v1"
+	desc "github.com/HpPpL/microservices_course_auth/grpc/pkg/auth_v1"
 )
 
 const grpcPort = 50051
