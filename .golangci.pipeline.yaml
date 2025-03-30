@@ -33,7 +33,7 @@ linters:
     - govet
     - ineffassign
     - revive
-    - typecheck
+#    - typecheck
     - unused
 
 issues:
