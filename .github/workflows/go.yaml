@@ -24,7 +24,7 @@ jobs:
             cache-dependency-path: go.sum
 
         - name: Build
-          run: go build -o ./bin/ -v ./...
+          run: go build -o ./grpc/bin/ -v ./grpc/cmd/grpc_server
 
         - name: Test
           run: go test -v ./...
