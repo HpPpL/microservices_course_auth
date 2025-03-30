@@ -6,7 +6,7 @@ import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto";
 import "google/protobuf/wrappers.proto";
 
-option go_package = "github.com/HpPpL/microservices_course/microservices_course_auth/grpc/pkg/auth_v1;auth_v1";
+option go_package = "github.com/HpPpL/microservices_course_auth/grpc/pkg/auth_v1;auth_v1";
 
 service AuthV1 {
   rpc Create(CreateRequest) returns (CreateResponse);
