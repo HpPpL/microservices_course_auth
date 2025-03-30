@@ -1,3 +1,5 @@
+version: "2"
+
 # More info on config here: https://golangci-lint.run/usage/configuration/#config-file
 run:
   concurrency: 8
