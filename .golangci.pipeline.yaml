@@ -39,7 +39,7 @@ linters:
     - govet
     - ineffassign
     - revive
-#    - typecheck
+    - typecheck
     - unused
     - misspell
     - nilnil
