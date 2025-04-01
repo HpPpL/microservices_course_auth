@@ -41,6 +41,9 @@ linters:
     - revive
     - typecheck
     - unused
+    - misspell
+    - nilnil
+    - prealloc
 
 issues:
   exclude-use-default: false

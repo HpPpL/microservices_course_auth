@@ -1,6 +1,6 @@
 module github.com/HpPpL/microservices_course_auth
 
-go 1.24
+go 1.21
 
 require (
 	github.com/fatih/color v1.15.0
