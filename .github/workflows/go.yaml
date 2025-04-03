@@ -117,8 +117,8 @@ jobs:
             fi
             
             # Start docker-compose
-            docker-compose --build up -d
-            
+            docker-compose up --build -d
+
       - name: Deploy to Selectel Cloud via SSH action Dockerfile
         uses: appleboy/ssh-action@v1.0.0
         with:
