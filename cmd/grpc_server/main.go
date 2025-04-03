@@ -2,25 +2,32 @@ package main
 
 import (
 	"context"
+	"database/sql"
+
+	"google.golang.org/protobuf/types/known/timestamppb"
+
 	"errors"
-	"fmt"
+	"flag"
 	"log"
 	"net"
-	"sync"
 	"time"
 
-	"crypto/rand"
-	"math/big"
-
+	sq "github.com/Masterminds/squirrel"
+	"github.com/jackc/pgx/v4/pgxpool"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/types/known/emptypb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/HpPpL/microservices_course_auth/internal/config"
 	desc "github.com/HpPpL/microservices_course_auth/pkg/auth_v1"
 )
 
-const grpcPort = 50051
+// Path to config
+var configPath string
+
+func init() {
+	flag.StringVar(&configPath, "config-path", ".env", "path to config file")
+}
 
 // User represents a system user with ID, name, email, role, and timestamps for creation and updates.
 type User struct {
@@ -29,145 +36,251 @@ type User struct {
 	Email     string
 	Role      desc.Role
 	CreatedAt time.Time
-	UpdatedAt time.Time
+	UpdatedAt sql.NullTime
 }
 
 // server implements the AuthV1 gRPC service by embedding UnimplementedAuthV1Server.
 type server struct {
 	desc.UnimplementedAuthV1Server
-}
-
-// SyncMap is a thread-safe map for storing pointers to User objects keyed by their ID.
-type SyncMap struct {
-	elems map[int64]*User
-	m     sync.RWMutex
-}
-
-var users = &SyncMap{
-	elems: make(map[int64]*User),
+	pool *pgxpool.Pool
 }
 
 var (
+	// General PG errors
+	errFailedBuildQuery = errors.New("failed to build query")
+	errUserDoesntExist  = errors.New("user with current id doesn't exist")
+
 	// Create errors
 	errPasswordDoesntMatch = errors.New("password doesn't match")
-	errIDGenerationFailed  = errors.New("id generation failed")
+	errInvalidRole         = errors.New("invalid role value")
+	errFailedInsertUser    = errors.New("failed to insert user")
 
 	// Get errors
-	errUserDoesntExist = errors.New("user doesn't exist")
+	errFailedSelectUser = errors.New("failed to select user")
+
+	// Update errors
+	errFailedUpdateUser = errors.New("failed to update user data")
+
+	// Delete errors
+	errFailedDeleteUser = errors.New("failed to delete user")
+)
+
+const (
+	roleUnspecified = "unspecified"
+	roleUser        = "user"
+	roleAdmin       = "admin"
 )
 
 // Create part
-func (s *server) Create(_ context.Context, req *desc.CreateRequest) (*desc.CreateResponse, error) {
+func (s *server) Create(ctx context.Context, req *desc.CreateRequest) (*desc.CreateResponse, error) {
+
 	log.Print("There is create request!")
 	if req.GetInfo().GetPassword() != req.GetInfo().GetPasswordConfirm() {
 		log.Print("Passwords do not match!")
 		return &desc.CreateResponse{}, errPasswordDoesntMatch
 	}
 
-	maxNum := big.NewInt(0).Lsh(big.NewInt(1), 63)
-	n, err := rand.Int(rand.Reader, maxNum)
+	var roleStr string
+	switch req.GetInfo().GetRole() {
+	case desc.Role_ROLE_UNSPECIFIED:
+		roleStr = roleUnspecified
+	case desc.Role_ROLE_USER:
+		roleStr = roleUser
+	case desc.Role_ROLE_ADMIN:
+		roleStr = roleAdmin
+	default:
+		log.Printf("invalid role value: %v", req.GetInfo().GetRole())
+		return &desc.CreateResponse{}, errInvalidRole
+	}
+
+	// Вынести имя таблицы можно попробовать потом
+	builderInsert := sq.Insert("users").
+		PlaceholderFormat(sq.Dollar).
+		Columns("name", "email", "role").
+		Values(req.GetInfo().GetName(), req.GetInfo().GetEmail(), roleStr).
+		Suffix("RETURNING id")
+
+	query, args, err := builderInsert.ToSql()
 	if err != nil {
-		log.Print("ID generation failed")
-		return &desc.CreateResponse{}, errIDGenerationFailed
-	}
-	id := n.Int64()
-
-	now := time.Now()
-	user := &User{
-		ID:        id,
-		Name:      req.GetInfo().GetName(),
-		Email:     req.GetInfo().GetEmail(),
-		Role:      req.GetInfo().GetRole(),
-		CreatedAt: now,
-		UpdatedAt: now,
+		log.Printf("failed to build query: %v", err)
+		return &desc.CreateResponse{}, errFailedBuildQuery
 	}
 
-	users.m.Lock()
-	defer users.m.Unlock()
-	users.elems[id] = user
+	var UserID int64
+	err = s.pool.QueryRow(ctx, query, args...).Scan(&UserID)
+	if err != nil {
+		log.Printf("failed to insert user: %v", err)
+		return &desc.CreateResponse{}, errFailedInsertUser
+	}
 
-	return &desc.CreateResponse{Id: id}, nil
+	log.Printf("inserted user with id: %v", UserID)
+	return &desc.CreateResponse{
+		Id: UserID,
+	}, nil
 }
 
 // Get part
-func (s *server) Get(_ context.Context, req *desc.GetRequest) (*desc.GetResponse, error) {
-	id := req.GetId()
+func (s *server) Get(ctx context.Context, req *desc.GetRequest) (*desc.GetResponse, error) {
+	log.Print("There is get request!")
 
-	users.m.RLock()
-	user, ok := users.elems[id]
-	users.m.RUnlock()
+	builderSelectOne := sq.Select("id", "name", "email", "role", "created_at", "updated_at").
+		From("users").
+		PlaceholderFormat(sq.Dollar).
+		Where(sq.Eq{"id": req.GetId()}).
+		Limit(1)
 
-	if !ok {
-		return &desc.GetResponse{}, errUserDoesntExist
+	query, args, err := builderSelectOne.ToSql()
+	if err != nil {
+		log.Printf("failed to build query: %v", err)
+		return &desc.GetResponse{}, errFailedBuildQuery
+	}
+
+	var id int64
+	var name, email, roleStr string
+	var createdAt time.Time
+	var updatedAt sql.NullTime
+
+	err = s.pool.QueryRow(ctx, query, args...).Scan(&id, &name, &email, &roleStr, &createdAt, &updatedAt)
+	if err != nil {
+		log.Printf("failed to select user: %v", err)
+		return &desc.GetResponse{}, errFailedSelectUser
+	}
+
+	var role desc.Role
+	switch roleStr {
+	case roleUnspecified:
+		role = desc.Role_ROLE_UNSPECIFIED
+	case roleUser:
+		role = desc.Role_ROLE_USER
+	case roleAdmin:
+		role = desc.Role_ROLE_ADMIN
+	default:
+		log.Print(errInvalidRole.Error())
+		return &desc.GetResponse{}, errInvalidRole
+	}
+
+	log.Printf("ID: %v, Name: %v, Email: %v, Role: %v, CreatedAt: %v, UpdatedAt: %v",
+		id, name, email, role, createdAt, updatedAt)
+
+	var updatedAtTime *timestamppb.Timestamp
+	if updatedAt.Valid {
+		updatedAtTime = timestamppb.New(updatedAt.Time)
 	}
 
 	return &desc.GetResponse{
-		Id:        user.ID,
-		Name:      user.Name,
-		Email:     user.Email,
-		Role:      user.Role,
-		CreatedAt: timestamppb.New(user.CreatedAt),
-		UpdatedAt: timestamppb.New(user.UpdatedAt),
+		Id:        id,
+		Name:      name,
+		Email:     email,
+		Role:      role,
+		CreatedAt: timestamppb.New(createdAt),
+		UpdatedAt: updatedAtTime,
 	}, nil
-
 }
 
 // Update part
-func (s *server) Update(_ context.Context, req *desc.UpdateRequest) (*emptypb.Empty, error) {
-	id := req.GetId()
+func (s *server) Update(ctx context.Context, req *desc.UpdateRequest) (*emptypb.Empty, error) {
+	log.Print("There is update request!")
 
-	users.m.Lock()
-	defer users.m.Unlock()
-	user, ok := users.elems[id]
+	userID := req.GetId()
 
-	if !ok {
-		log.Print("User not found!")
-		return &emptypb.Empty{}, errUserDoesntExist
-	}
+	builderUpdate := sq.Update("users").
+		PlaceholderFormat(sq.Dollar).
+		Where(sq.Eq{"id": userID})
 
 	nameWrapper := req.GetName()
 	if nameWrapper != nil {
-		// Если поле не пустое - обновляем
-		user.Name = nameWrapper.GetValue()
+		builderUpdate = builderUpdate.Set("name", nameWrapper.GetValue())
 	}
 
 	emailWrapper := req.GetEmail()
 	if emailWrapper != nil {
-		// Ну тут аналогично
-		user.Email = emailWrapper.GetValue()
+		builderUpdate = builderUpdate.Set("email", emailWrapper.GetValue())
 	}
 
-	now := time.Now()
-	user.UpdatedAt = now
+	builderUpdate = builderUpdate.Set("updated_at", time.Now())
+
+	query, args, err := builderUpdate.ToSql()
+	if err != nil {
+		log.Printf("failed to build query: %v", err)
+		return &emptypb.Empty{}, errFailedBuildQuery
+	}
+
+	res, err := s.pool.Exec(ctx, query, args...)
+	if err != nil {
+		log.Printf("failed to update user data: %v", err)
+		return &emptypb.Empty{}, errFailedUpdateUser
+	}
+
+	if res.RowsAffected() == 0 {
+		return &emptypb.Empty{}, errUserDoesntExist
+	}
+
+	log.Printf("updated %d rows", res.RowsAffected())
 
 	return &emptypb.Empty{}, nil
 }
 
 // Delete part
-func (s *server) Delete(_ context.Context, req *desc.DeleteRequest) (*emptypb.Empty, error) {
-	id := req.GetId()
+func (s *server) Delete(ctx context.Context, req *desc.DeleteRequest) (*emptypb.Empty, error) {
+	userID := req.GetId()
 
-	users.m.Lock()
-	defer users.m.Unlock()
-	_, ok := users.elems[id]
+	builderDelete := sq.Delete("users").
+		PlaceholderFormat(sq.Dollar).
+		Where(sq.Eq{"id": userID})
 
-	if !ok {
+	query, args, err := builderDelete.ToSql()
+	if err != nil {
+		log.Printf("failed to build query: %v", err)
+		return &emptypb.Empty{}, errFailedBuildQuery
+	}
+
+	res, err := s.pool.Exec(ctx, query, args...)
+	if err != nil {
+		log.Printf("failed to delete user: %v", err)
+		return &emptypb.Empty{}, errFailedDeleteUser
+	}
+
+	if res.RowsAffected() == 0 {
 		return &emptypb.Empty{}, errUserDoesntExist
 	}
 
-	delete(users.elems, id)
+	log.Printf("Deleted %d rows", res.RowsAffected())
 	return &emptypb.Empty{}, nil
 }
 
 func main() {
-	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", grpcPort))
+	flag.Parse()
+	ctx := context.Background()
+
+	err := config.Load(configPath)
+	if err != nil {
+		log.Fatalf("failed to load config: %v", err)
+	}
+
+	grpcConfig, err := config.NewGRPCConfig()
+	if err != nil {
+		log.Fatalf("failed to get grpc config")
+	}
+
+	pgConfig, err := config.NewPGConfig()
+	if err != nil {
+		log.Fatalf("failed to get pg config")
+	}
+
+	lis, err := net.Listen("tcp", grpcConfig.Address())
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
 
+	pool, err := pgxpool.Connect(ctx, pgConfig.DSN())
+	if err != nil {
+		log.Fatalf("failed to connect to database: %v", err)
+	}
+	defer pool.Close()
+
 	s := grpc.NewServer()
 	reflection.Register(s)
-	desc.RegisterAuthV1Server(s, &server{})
+	desc.RegisterAuthV1Server(s, &server{pool: pool})
 
 	log.Printf("server listening at %v", lis.Addr())
 

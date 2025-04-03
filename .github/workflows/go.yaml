@@ -16,61 +16,61 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
     steps:
-        - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-        - name: Set up Go
-          uses: actions/setup-go@v5
-          with:
-            go-version: '1.24'
-            cache-dependency-path: go.sum
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache-dependency-path: go.sum
 
-        - name: Build
-          run: go build -o ./bin/grpc_server -v ./cmd/grpc_server/main.go
+      - name: Build
+        run: go build -o ./bin/grpc_server -v ./cmd/grpc_server/main.go
 
-        - name: Test
-          run: go test -v ./...
+      - name: Test
+        run: go test -v ./...
 
-#  linter:
-#    name: lint
-#    runs-on: ubuntu-latest
-#    steps:
-#      - uses: actions/checkout@v4
-#      - uses: actions/setup-go@v5
-#        with:
-#          go-version: '1.21.7'
-#          cache: false
-#      - name: golangci-lint
-#        uses: golangci/golangci-lint-action@v6
-#        with:
-#          # Require: The version of golangci-lint to use.
-#          # When `install-mode` is `binary` (default) the value can be v1.2 or v1.2.3 or `latest` to use the latest version.
-#          # When `install-mode` is `goinstall` the value can be v1.2.3, `latest`, or the hash of a commit.
-#          version: v1.53.3
-#
-#          # Optional: working directory, useful for monorepos
-#          # working-directory: somedir
-#
-#          # Optional: golangci-lint command line arguments.
-#          #
-#          # Note: By default, the `.golangci.yml` file should be at the root of the repository.
-#          # The location of the configuration file can be changed by using `--config=`
-#          args: --timeout=30m --config=./.golangci.pipeline.yaml
-#
-#          # Optional: show only new issues if it's a pull request. The default value is `false`.
-#          # only-new-issues: true
-#
-#          # Optional: if set to true, then all caching functionality will be completely disabled,
-#          #           takes precedence over all other caching options.
-#          # skip-cache: true
-#
-#          # Optional: if set to true, then the action won't cache or restore ~/go/pkg.
-#          # skip-pkg-cache: true
-#
-#          # Optional: if set to true, then the action won't cache or restore ~/.cache/go-build.
-#          # skip-build-cache: true
-#
-#          # Optional: The mode to install golangci-lint. It can be 'binary' or 'goinstall'.
-#          # install-mode: "goinstall"
+  #  linter:
+  #    name: lint
+  #    runs-on: ubuntu-latest
+  #    steps:
+  #      - uses: actions/checkout@v4
+  #      - uses: actions/setup-go@v5
+  #        with:
+  #          go-version: '1.21.7'
+  #          cache: false
+  #      - name: golangci-lint
+  #        uses: golangci/golangci-lint-action@v6
+  #        with:
+  #          # Require: The version of golangci-lint to use.
+  #          # When `install-mode` is `binary` (default) the value can be v1.2 or v1.2.3 or `latest` to use the latest version.
+  #          # When `install-mode` is `goinstall` the value can be v1.2.3, `latest`, or the hash of a commit.
+  #          version: v1.53.3
+  #
+  #          # Optional: working directory, useful for monorepos
+  #          # working-directory: somedir
+  #
+  #          # Optional: golangci-lint command line arguments.
+  #          #
+  #          # Note: By default, the `.golangci.yml` file should be at the root of the repository.
+  #          # The location of the configuration file can be changed by using `--config=`
+  #          args: --timeout=30m --config=./.golangci.pipeline.yaml
+  #
+  #          # Optional: show only new issues if it's a pull request. The default value is `false`.
+  #          # only-new-issues: true
+  #
+  #          # Optional: if set to true, then all caching functionality will be completely disabled,
+  #          #           takes precedence over all other caching options.
+  #          # skip-cache: true
+  #
+  #          # Optional: if set to true, then the action won't cache or restore ~/go/pkg.
+  #          # skip-pkg-cache: true
+  #
+  #          # Optional: if set to true, then the action won't cache or restore ~/.cache/go-build.
+  #          # skip-build-cache: true
+  #
+  #          # Optional: The mode to install golangci-lint. It can be 'binary' or 'goinstall'.
+  #          # install-mode: "goinstall"
   image-build-and-push:
     runs-on: ubuntu-latest
 
@@ -85,7 +85,7 @@ jobs:
         run: docker login -u ${{ secrets.REGISTRY_USERNAME }} -p ${{ secrets.REGISTRY_PASSWORD }} $REGISTRY
 
       - name: Build and Push Docker Image
-#       Тут в крайней строчке сначала путь к файлу, а потом контекст выполнения (из какой папки будут запускаться команды)
+        #       Тут в крайней строчке сначала путь к файлу, а потом контекст выполнения (из какой папки будут запускаться команды)
         run: |
           TAG_NAME=$(echo $GITHUB_SHA | head -c7)
           docker buildx create --use
@@ -96,7 +96,7 @@ jobs:
     needs: image-build-and-push
 
     steps:
-      - name: Deploy to Selectel Cloud via SSH action
+      - name: Deploy to Selectel Cloud via SSH action Dockerfile
         uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -116,5 +116,29 @@ jobs:
             # Remove old container
             docker rm $CONTAINER_NAME
 
-            # Run a new container from a new image
-            docker run -d -p 50051:50051 --name $CONTAINER_NAME -t $REGISTRY/$IMAGE_NAME:$TAG_NAME
+            # Run a new container from a new image. There is a moment with network config!
+            docker run -d -p 50051:50051 --network auth_default --name $CONTAINER_NAME -t $REGISTRY/$IMAGE_NAME:$TAG_NAME
+
+      - name: Deploy to Selectel Cloud via SSH action Docker-compose file
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSHKEY }}
+          envs: IMAGE_NAME,REGISTRY,GITHUB_SHA,CONTAINER_NAME
+          script: |
+            # Hardcoded paths to repo and dir
+            REPO_DIR="./auth"
+            REPO_URL="https://github.com/HpPpL/microservices_course_auth"
+            
+            if [ -d "$REPO_DIR" ]; then
+              echo "Repository exists. Pulling latest changes..."
+              cd "$REPO_DIR" && git pull
+            else
+              echo "Repository does not exist. Cloning..."
+              git clone "$REPO_URL" "$REPO_DIR" && cd "$REPO_DIR"
+            fi
+            
+            # Start docker-compose
+            docker-compose --build up -d
+            

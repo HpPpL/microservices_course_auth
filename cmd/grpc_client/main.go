@@ -14,7 +14,6 @@ import (
 
 const (
 	address = "localhost:50051"
-	authID  = 151417018088165515
 )
 
 func main() {
@@ -33,7 +32,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	r, err := c.Get(ctx, &desc.GetRequest{Id: authID})
+	r, err := c.Get(ctx, &desc.GetRequest{Id: 6})
 	if err != nil {
 		log.Fatalf("failed to get note by id: %v", err)
 	}
