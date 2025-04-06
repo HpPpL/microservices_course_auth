@@ -12,9 +12,9 @@ install-deps:
 	make install-golangci-lint-deps
 
 # go
-
 goimports-format:
 	goimports -w cmd/grpc_server/main.go
+
 # grpc
 install-grpc-deps:
 	GOBIN=$(LOCAL_BIN) go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.28.1

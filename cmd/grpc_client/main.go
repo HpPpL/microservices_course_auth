@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log"
 	"time"
 
@@ -9,15 +10,31 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/HpPpL/microservices_course_auth/internal/config"
 	desc "github.com/HpPpL/microservices_course_auth/pkg/auth_v1"
 )
 
-const (
-	address = "localhost:50051"
-)
+// Path to config
+var configPath string
+
+func init() {
+	flag.StringVar(&configPath, "config-path", ".env", "path to config file")
+}
 
 func main() {
-	conn, err := grpc.Dial(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	flag.Parse()
+
+	err := config.Load(configPath)
+	if err != nil {
+		log.Fatalf("failed to load config: %v", err)
+	}
+
+	grpcConfig, err := config.NewGRPCConfig()
+	if err != nil {
+		log.Fatalf("failed to get grpc config")
+	}
+
+	conn, err := grpc.Dial(grpcConfig.Address(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Fatalf("did not connect: %v", err)
 	}
@@ -32,10 +49,10 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	r, err := c.Get(ctx, &desc.GetRequest{Id: 6})
+	r, err := c.Get(ctx, &desc.GetRequest{Id: 1})
 	if err != nil {
-		log.Fatalf("failed to get note by id: %v", err)
+		log.Fatalf("failed to get user by id: %v", err)
 	}
 
-	log.Printf(color.RedString("Note info:\n"), color.GreenString("%+v", r.GetName()))
+	log.Printf(color.RedString("User info:\n"), color.GreenString("%+v", r.GetName()))
 }
